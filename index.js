@@ -10,3 +10,15 @@ handle("SwitchLights", function() {
     light.setRandomColor();
   });
 });
+
+
+meta("SomeoneCameHome")
+  .seq("dooropen", ANY("doorclose"), "motion")
+  .where(function(e1, e2, e3) {
+
+  })
+  .within(30);
+
+state("TomIsHome")
+  .init()
+  .on("");

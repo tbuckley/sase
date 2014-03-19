@@ -1,0 +1,220 @@
+var Symbol = require("./symbol");
+
+// A pattern is a series of symbols at increasing position
+// A sequence is a series of instances, with potentially empty positions
+// A symbol can match a name
+// An instance has a name, and therefore can match a symbol
+// A symbol has a set of pre
+
+
+function Pattern(options) {
+  var pattern, prevs, stacks, positionsByName;
+  pattern = this.pattern = options.pattern;
+  prevs = this.prevs = []; // @TODO
+  stacks = this.stacks = []; // @TODO
+  positionsByName = this.positionsByName = {};
+
+  pattern.forEach(function(symbol, i) {
+    // Store indices for each name
+    Symbol.forEachName(symbol, function(name) {
+      if(name in positionsByName) {
+        positionsByName[name].push(i);
+      } else {
+        positionsByName[name] = [i];
+      }
+    });
+
+    // Prevs
+    prevs[i] = [];
+    if(i > 0) {prevs[i].push(i-1);}
+    if(i > 1 && Symbol.isNeg(pattern[i-1])) {prevs[i].push(i-2);}
+
+    // Init stack
+    stacks[i] = null;
+  });
+}
+
+Pattern.prototype.forEachName = function(fn) {
+  for(var name in this.positionsByName) {
+    fn(name);
+  }
+};
+
+Pattern.prototype.handleInstance = function(name, data, time) {
+  this.pruneOldInstances();
+
+  var positions = this.getPositionsForName(name);
+  positions.forEach(function(pos) {
+    var instance = this.updateMostRecentInstanceForPos(pos, {
+      name: name,
+      data: data,
+      time: time,
+      pos: pos,
+    });
+    if(instance !== null && this.isLastPos(pos)) {
+      this.checkCompletion(instance);
+    }
+  }.bind(this));
+};
+
+Pattern.prototype.checkCompletion = function(instance) {
+  var sequences = this.generateSequences(instance);
+  sequences.forEach(function(seq) {
+    console.log(this.printableSequence(seq));
+  }.bind(this));
+};
+
+Pattern.prototype.printableSequence = function(sequence) {
+  return this.pattern.map(function(name, i) {
+    if(i in sequence) {
+      if(sequence[i].length > 0) {
+        return sequence[i].map(function(val) {
+          return [val.name, val.time];
+        });
+      }
+      return [sequence[i].name, sequence[i].time];
+    }
+    return null;
+  });
+};
+
+Pattern.prototype.generateSequences = function(instance) {
+  var subsequences, sequences, seq;
+  sequences = [];
+  if(instance.mrp !== null) {
+    isNeg = Symbol.isNeg(this.pattern[instance.mrp.pos]);
+    if(isNeg) {
+      forEachUniqNeg(instance.mrp, function(negs, ancestor) {
+        subsequences = this.generateSequences(ancestor);
+        sequences = sequences.concat(subsequences.map(function(subseq) {
+          subseq[instance.mrp.pos] = negs;
+          subseq[instance.pos] = instance;
+          return subseq;
+        }));
+      }.bind(this));
+    } else {
+      forEachAncestor(instance.mrp, function(ancestor) {
+        subsequences = this.generateSequences(ancestor);
+        sequences = sequences.concat(subsequences.map(function(subseq) {
+          subseq[instance.pos] = instance;
+          return subseq;
+        }));
+      }.bind(this));
+    }
+    return sequences;
+  } else {
+    seq = {};
+    seq[instance.pos] = instance;
+    return [seq];
+  }
+};
+
+// getMostRecentInstanceForPos gets the instance that most recently matched the
+// symbol at the given position
+// Returns an instance (or null)
+Pattern.prototype.getMostRecentInstanceForPos = function(pos) {
+  return this.stacks[pos];
+};
+
+// updateMostRecentInstanceForPos saves the instance that most recently matched
+// the symbol at the given position
+// Returns instance if successfully added, otherwise null
+Pattern.prototype.updateMostRecentInstanceForPos = function(pos, instance) {
+  var mrp = this.getMostRecentPreviousInstanceForPos(pos);
+  var predecessor = this.getMostRecentInstanceForPos(pos);
+  if(this.isFirstPos(pos) || mrp !== null) {
+    instance.mrp = mrp;
+    instance.predecessor = predecessor;
+    this.stacks[pos] = instance;
+    return instance;
+  }
+  return null;
+};
+
+Pattern.prototype.getPositionsForName = function(name) {
+  return this.positionsByName[name];
+};
+
+Pattern.prototype.pruneOldInstances = function() {
+
+};
+
+// Get the instances that could have preceded the symbol at position pos
+// Returns an array of instances (all guaranteed non-null)
+Pattern.prototype.getPreviousInstancesForPos = function(pos) {
+  return this.prevs[pos].map(function(pos) {
+    return this.getMostRecentInstanceForPos(pos);
+  }.bind(this)).filter(function(instance) {
+    return instance !== null;
+  });
+};
+
+// Get the instance that most recently preceded the symbol at position pos
+// Returns an instance (or null)
+Pattern.prototype.getMostRecentPreviousInstanceForPos = function(pos) {
+  var mrp, candidate, prevInstances;
+  prevInstances = this.getPreviousInstancesForPos(pos);
+  if(prevInstances.length > 0) {
+    mrp = prevInstances[0];
+    prevInstances.slice(1).forEach(function(candidate) {
+      if(candidate.time > mrp.time) {
+        mrp = candidate;
+      }
+    });
+    return mrp;
+  } else {
+    return null;
+  }
+};
+
+// getPositives returns a sequence containing only positive symbols
+Pattern.prototype.getPositives = function(sequence) {
+  return this.pattern.map(function(name, i) {
+    return (i in sequence) ? sequence[i] : null;
+  }).filter(function(val, i) {
+    return !Symbol.isNeg(this.pattern[i]);
+  });
+};
+
+// isFirstPos tests if the given position is the pattern's first
+// Return boolean
+Pattern.prototype.isFirstPos = function(pos) {
+  return pos === 0;
+};
+// isLastPos tests if the given position is the pattern's last
+// Return boolean
+Pattern.prototype.isLastPos = function(pos) {
+  return pos+1 === this.pattern.length;
+};
+// isLastSymbol tests if the given name matches the pattern's last symbol
+// Return boolean
+Pattern.prototype.isLastSymbol = function(name) {
+  var lastIndex = this.pattern.length - 1;
+  var lastSymbol = this.pattern[lastIndex];
+  return nameMatchesSymbol(name, lastSymbol);
+};
+
+function forEachAncestor(instance, fn) {
+  var snaker = instance;
+  while(snaker !== null) {
+    fn(snaker);
+    snaker = snaker.predecessor;
+  }
+}
+
+function forEachUniqNeg(instance, fn) {
+  var snaker = instance;
+  var mrp = snaker.mrp;
+  var negs = [];
+  while(snaker !== null) {
+    if(snaker.mrp !== mrp) {
+      fn(negs, mrp);
+      mrp = snaker.mrp;
+    }
+    negs.push(snaker);
+    snaker = snaker.predecessor;
+  }
+  fn(negs, mrp);
+}
+
+exports.Pattern = Pattern;
