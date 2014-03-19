@@ -1,6 +1,6 @@
 var TestStream = require("./common_test").TestStream;
-var Cursor = require("./cursor").Cursor,
-    symbol = require("./symbol"),
+var Cursor = require("../lib/cursor").Cursor,
+    symbol = require("../lib/symbol"),
     neg = symbol.neg,
     any = symbol.any;
 
